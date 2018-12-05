@@ -1,0 +1,360 @@
+using System;
+using System.Collections.Generic;
+using System.Linq;
+using System.Text;
+using System.Threading.Tasks;
+using System.IO;
+using Poseidon.Analysis;
+using System.Collections;
+using System.Text.RegularExpressions;
+namespace ConsoleApp2
+{
+    class Program
+    {
+        static void Main(string[] args)
+        {
+            //Đường dẫn file
+            string path_StopWords = @"lemur-stopwords.txt";
+            string path_InvertedIndex = @"InvertedIndex.txt";
+            string path_SaveResult = @"Result.txt";
+
+            //Khai báo
+            PorterStemmer Pstemmer = new PorterStemmer();
+            ArrayList arrayListStopWords = new ArrayList(); //Lưu các StopWords
+            Dictionary<string, string> dictionary = new Dictionary<string, string>(); //Lưu key: term , value : DocID
+            List<string> listResult = new List<string>(); //Lưu kết quả truy vấn trên Document
+            List<string> listResultID = new List<string>(); //Lưu kết quả truy vấn DocID
+            Dictionary<string, string> dictionaryPath = new Dictionary<string, string>(); //Lưu đường dẫn File
+            dictionaryPath.Add("1", "moocs.dat");
+            dictionaryPath.Add("2", "metadata.dat");
+
+
+            //Gọi hàm
+
+            getStopWords(path_StopWords, arrayListStopWords);
+            foreach (KeyValuePair<string, string> keyValuePair in dictionaryPath)
+                addDictionary(keyValuePair.Value, keyValuePair.Key, Pstemmer, dictionary, arrayListStopWords);
+
+            saveInvertedIndex(path_InvertedIndex, dictionary);
+            RemoveAll(arrayListStopWords, dictionary);
+            loadInvertedIndex(path_InvertedIndex, dictionary);
+            Menu(path_SaveResult, arrayListStopWords, Pstemmer, listResult, dictionary, dictionaryPath);
+            Console.ReadKey();
+
+        }
+
+
+        //StopWords
+        static void getStopWords(string PathStopWords, ArrayList arrayListStopWords)
+        {
+            //Đọc file StopWords
+            using (StreamReader reader = new StreamReader(PathStopWords))
+            {
+                if (reader == null) return;
+                string line = null;
+                while ((line = reader.ReadLine()) != null)
+                    //thêm từ đã loại bỏ khoảng trắng và chuyển in hoa thành in thường vào arrayListStopWords
+                    arrayListStopWords.Add(line.Trim().ToLower());
+            }
+        }
+        //Token
+        static List<string> Tokenization(string Line, PorterStemmer Pstemmer)
+        {
+            //giới hạn khoảng trắng
+            string limit = limitSpace(Line);
+            List<string> ListToken = new List<string>();
+            List<string> temp = limit.Split(' ').ToList<string>();
+            for (int i = 0; i < temp.Count; i++)
+            {
+
+                bool math = Regex.IsMatch(temp[i], @"http");
+                if (math)
+                {
+                    temp.RemoveAt(i);
+                }
+                else ListToken.Add(Pstemmer.StemWord(temp[i].ToLower()));
+
+            }
+            return ListToken;
+        }
+        static void addDictionary(string PathDocument, string DocID, PorterStemmer Pstemmer, Dictionary<string, string> dictionary, ArrayList arrayListStopWords)
+        {
+            using (StreamReader reader = new StreamReader(PathDocument))
+            {
+                if (reader == null)
+                    return;
+                string line = null;
+                while ((line = reader.ReadLine()) != null)
+                {
+                    foreach (var term in Tokenization(line, Pstemmer))
+                    {
+                        invertedIndex(term, DocID, dictionary);
+
+                    }
+                }
+                RemoveStopWords(arrayListStopWords, dictionary);
+            }
+        }
+
+        static void invertedIndex(string term, string DocID, Dictionary<string, string> dictionary)
+        {
+            //Kiểm tra term truyền vào đã tồn tại trong Dictionary chưa
+            if (dictionary.ContainsKey(term))
+            {
+                if (dictionary[term].Length == 1 && dictionary[term] != DocID)
+                    //docID mới = docID(cũ) +"/"+ docID(mới)
+                    dictionary[term] = dictionary[term] + "-" + DocID;
+                //nếu docID ứng với term khác 1
+                if (isCompare(dictionary[term], DocID))
+                    dictionary[term] = dictionary[term] + "-" + DocID;
+
+            }
+            //Chưa tồn tại thì bổ sung term và DocID vào Dictionary
+            else dictionary.Add(term, DocID);
+        }
+        static bool isCompare(string postings, string target)
+        {
+            //postings = DocID cũ, target = DocID mới
+            if (postings.Length <= 1) return false;
+            //cắt chuỗi docID VD: 1/2 cắt thành 1 2
+            string[] s = postings.Split('-');
+            //duyệt qua mảng các phần tử mảng s
+            for (int i = 0; i < s.Length; i++)
+                //kiểm tra nếu s[i] bằng target(docID mới) thì trả về false
+                if (s[i] == target) return false;
+            return true;
+        }
+        static string limitSpace(string LineWithWhiteSpace)
+        {
+            StringBuilder sb = new StringBuilder();
+            bool lastWasSpace = true;
+            //duyệt qua các kí tự bao gồm khoảng trắng
+            for (int i = 0; i < LineWithWhiteSpace.Length; i++)
+            {
+                //kiểm tra kí tự thứ i có phải khoảng trắng không, nếu đúng thì bỏ qua
+                if (Char.IsWhiteSpace(LineWithWhiteSpace[i]) && lastWasSpace)
+                    continue;
+                //gán lại giá trị cho lastWasSpace
+                lastWasSpace = Char.IsWhiteSpace(LineWithWhiteSpace[i]);
+                //thêm kí tự vào với 1 khoảng trắng giữa 2 kí tự
+                sb.Append(LineWithWhiteSpace[i]);
+            }
+            return sb.ToString();
+
+        }
+        static List<string> SpitSpaces(string line, PorterStemmer Pstemmer)
+        {
+            List<string> temp = new List<string>();
+            //Loại bỏ khoảng trắng
+            string[] s = line.Split(' ');
+            //duyệt qua các phần tử mảng s
+            foreach (string i in s)
+                //add các từ đã chuyển thành từ gốc và in thường
+                temp.Add(Pstemmer.StemWord(i).ToLower());
+            return temp;
+
+        }
+        //Remove StopWords
+        static void RemoveStopWords(ArrayList arrayListStopWords, Dictionary<string, string> dictionary)
+        {
+            //duyệt qua các phần tử trong StopWords
+            foreach (string StopWords in arrayListStopWords)
+            {
+                //Nếu tồn tại StopWords trong Dictionary
+                if (dictionary.ContainsKey(StopWords))
+                    //Loại bỏ Stopwords
+                    dictionary.Remove(StopWords);
+                //Nếu tồn tại "|" trong Dictionary
+                if (dictionary.ContainsKey("|"))
+                    //Loại bỏ "|"
+                    dictionary.Remove("|");
+
+            }
+        }
+        //Query
+        static void getQuery(string pathResult, ArrayList arrayListStopWords, PorterStemmer Pstemmer, Dictionary<string, string> dictionary, Dictionary<string, string> dicPath, List<string> listResult)
+        {
+            Console.Write("Query: ");
+            //Nhập Query
+            string query = Console.ReadLine();
+            //Gọi hàm Search
+            search(query, arrayListStopWords, Pstemmer, dictionary, listResult, dicPath);
+            //Gọi hàm saveResult
+            saveResult(pathResult, query, listResult);
+
+        }
+        static void search(string Query, ArrayList arrayListStopWords, PorterStemmer Pstemmer, Dictionary<string, string> dictionary, List<string> listResult, Dictionary<string, string> dicPath)
+        {
+            string LimitSpace = limitSpace(Query);
+            string values1 = "";
+            string values2 = "";
+            List<string> listPostings = new List<string>();
+
+            //duyệt arrayListStopWords
+            foreach (string stopWords in arrayListStopWords)
+            {
+                // kiểm tra có stopWords trong list SpitSpaces không
+                if (SpitSpaces(LimitSpace, Pstemmer).Contains(stopWords))
+                    //loại bỏ stopWords trong list SpitSpaces
+                    SpitSpaces(LimitSpace, Pstemmer).Remove(stopWords);
+            }
+            //duyệt list SpitSpaces
+            foreach (string i in SpitSpaces(LimitSpace, Pstemmer))
+            {
+                if (dictionary.TryGetValue(i, out values1))
+                    //kiểm tra docID đã tồn tại trong listPostings chưa
+                    //nếu có thì bỏ qua
+                    //nếu chưa thì add vào listPostings
+                    if (listPostings.Contains(values1))
+                        continue;
+                    else listPostings.Add(values1);
+            }
+
+            //kiểm tra số lượng phần tử có bằng 1 ko
+            if (listPostings.Count == 1)
+            {
+                //duyệt qua listPostings
+                foreach (string i in listPostings)
+                {
+                    //nếu độ dài phần tử i (docID) bằng 1 không vd key a(term); valus 1(docID)
+                    if (i.Length == 1)
+                    {
+                        //kiểm tra docID tồn tại trong DicPath không
+                        if (dicPath.TryGetValue(i, out values1))
+                        {
+                            //thêm tên file ứng với DocID vào listResult 
+                            listResult.Add(values1);
+                            Console.WriteLine(values1);
+                        }
+                    }
+                    else
+                    {
+                        //loại bỏ '/' trong docID
+                        string[] temp = i.Split('/');
+                        //duyệt qua mảng temp
+                        foreach (string j in temp)
+                        {
+                            //kiểm tra docID tồn tại trong DicPath không
+                            if (dicPath.TryGetValue(j, out values2))
+                            {
+                                //thêm tên file ứng với DocID vào listResult 
+                                listResult.Add(values2);
+                                Console.WriteLine(values2);
+                            }
+                        }
+                    }
+                }
+            }
+            else
+            {
+                //nếu số phần tử listPostings khác 1
+                string s = "khong phai truy van and";
+                //thêm s vào listResult
+                listResult.Add(s);
+                Console.WriteLine(s);
+            }
+            //loại bỏ các phần tử trong list SpitSpaces
+            SpitSpaces(LimitSpace, Pstemmer).Clear();
+            //loại bỏ các phần tử trong listPostings
+            listPostings.Clear();
+        }
+        //save và load  Inverted Index
+        static void saveInvertedIndex(string path, Dictionary<string, string> dictionary)
+        {
+            using (StreamWriter writer = new StreamWriter(path))
+            {
+                if (writer == null) return;
+                //duyệt qua các phần tử trong dictionary
+                foreach (KeyValuePair<string, string> keyValuePair in dictionary)
+                    //ghi các phần tử với key và value với 1 khoảng trắng vào file SaveInvertedIndex.txt
+                    writer.WriteLine(keyValuePair.Key + " " + keyValuePair.Value);
+
+            }
+        }
+        static void loadInvertedIndex(string path, Dictionary<string, string> dictionary)
+        {
+            using (StreamReader reader = new StreamReader(path))
+            {
+                if (reader == null) return;
+                string line = null;
+                while ((line = reader.ReadLine()) != null)
+                {
+                    //cắt khoảng trắng
+                    string[] temp = line.Split(' ');
+                    //gán keys với phần tử đầu tiên trong mảng temp
+                    string Key = temp[0];
+                    //gán Value với phần tử thứ 2 trong mảng temp
+                    string Value = temp[1];
+                    //thêm key và value vào dictionary
+                    dictionary.Add(Key, Value);
+                }
+            }
+        }
+        //Save và load Result
+        static void saveResult(string Path, string query, List<string> listResult)
+        {
+            //gọi hàm getResult
+            using (StreamWriter writer = new StreamWriter(Path))
+            {
+                if (writer == null) return;
+                foreach (string Result in listResult)
+                    //ghi kết quả có trong listResult xuống file SaveResult.txt
+                    writer.WriteLine(Result);
+            }
+            //loại bỏ các phần tử trong _istResult
+            listResult.Clear();
+
+        }
+        static void loadResult(string Path)
+        {
+            using (StreamReader reader = new StreamReader(Path))
+            {
+                if (reader == null) return;
+                string line = null;
+                while ((line = reader.ReadLine()) != null)
+                    Console.WriteLine(line);
+            }
+        }
+        // Remove element dictionary and arrayListStopWords
+        static void RemoveAll(ArrayList arrayListStopWords, Dictionary<string, string> dictionary)
+        {
+            //loại bỏ các phần tử trong arrayListStopWords
+            arrayListStopWords.Clear();
+            //loại bỏ các phần tử trong dictionary
+            dictionary.Clear();
+        }
+
+        //Menu
+        static void Menu(string pathResult, ArrayList arrayListStopWords, PorterStemmer Pstemmer, List<string> listResult, Dictionary<string, string> dictionary, Dictionary<string, string> DicPath)
+        {
+            char op;
+            while (true)
+            {
+                Console.Write("Q - search\n");
+                Console.Write("R - Result\n");
+                Console.Write("X - exit\n");
+                Console.Write("Command (One character only): ");
+                op = char.Parse(Console.ReadLine());
+
+                if (op == 'X' || op == 'x')
+                    Environment.Exit(0);
+
+                switch (op)
+                {
+                    case 'Q':
+                    case 'q':
+                        getQuery(pathResult, arrayListStopWords, Pstemmer, dictionary, DicPath, listResult);
+                        break;
+                    case 'R':
+                    case 'r':
+                        loadResult(pathResult);
+                        break;
+                }
+                Console.ReadKey();
+            }
+        }
+    }
+}
+
+        
+
